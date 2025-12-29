@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/cliffordolawaiye/Documents/Arduino/arduino_2560_irrigation_proj",
+      "program": "/Users/cliffordolawaiye/Documents/Arduino/arduino_2560_irrigation_proj/build/Debug/outDebug"
+    }
+  ]
+}
