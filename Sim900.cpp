@@ -1,5 +1,5 @@
 #include "Sim900.h"
-#include "Parser.h"
+#include "Irrigation.h"
 #include "Pins.h"
 
 Sim900Client::Sim900Client()
@@ -133,6 +133,17 @@ void Sim900Client::loop() {
 
 int Sim900Client::pollAndProcess(IrrigationCommand& cmd) {
   unsigned long now = millis();
+  // If there is a queued status update and modem is idle, send it immediately
+  if (isIdle() && !hasNewResponse()) {
+    String pendingUrl;
+    if (ParserServer::consumePendingStatus(pendingUrl) && pendingUrl.length() > 0) {
+      Serial.print("["); Serial.print(ROLE_NAME); Serial.print("] Sending queued status: ");
+      Serial.println(pendingUrl);
+      startGet(pendingUrl.c_str());
+      // status updates do not affect regular polling interval
+      return -3;
+    }
+  }
   if (now >= nextPollAt) {
     Serial.print("["); Serial.print(ROLE_NAME); Serial.print("] Polling: "); Serial.println(ROLE_URL);
     if (isIdle() && !hasNewResponse()){
@@ -150,7 +161,7 @@ int Sim900Client::pollAndProcess(IrrigationCommand& cmd) {
     Serial.println("] HTTP body:");
     Serial.println(body);
 
-    cmd = parsePayload(body);
+    cmd = ParserServer::parsePayload(body);
     if (!cmd.valid) {
       Serial.println("Parse failed or empty command.");
       return -1;
@@ -207,5 +218,104 @@ const Sim900Client::StateDef Sim900Client::STATE_TABLE[] = {
   { "Error",        &Sim900Client::enter_NoOp,         5000,  StartBearer0, Error,     NULL }
   //When error state times out, it will transition to StartBearer0 to retry the connection
 };
+
+namespace {
+  int indexOfField(const String& s, const String& key) {
+    String needle = key + "=";
+    int pos = s.indexOf(needle);
+    if (pos < 0) return -1;
+    return pos + needle.length();
+  }
+
+  String readFieldValue(const String& s, const String& key) {
+    int start = indexOfField(s, key);
+    if (start < 0) return "";
+    int end = s.indexOf(';', start);
+    if (end < 0) end = s.length();
+    return s.substring(start, end);
+  }
+}
+
+namespace ParserServer {
+  struct PendingStatus {
+    volatile bool has;
+    long id;
+    uint8_t status;
+    uint8_t remainingMinutes;
+  };
+  static PendingStatus g_pending = { false, 0, 0, 0 };
+
+  bool consumePendingStatus(String& outUrl) {
+    if (!g_pending.has) return false;
+    outUrl = buildStatusUrl(g_pending.id, g_pending.status, g_pending.remainingMinutes);
+    g_pending.has = false;
+    return true;
+  }
+  IrrigationCommand parsePayload(const String& payload) {
+    IrrigationCommand cmd; // default-initialized
+    if (payload.length() == 0) return cmd;
+
+    String idStr = readFieldValue(payload, "ID");
+    String zStr  = readFieldValue(payload, "Z");
+    String tStr  = readFieldValue(payload, "T");
+    String mStr  = readFieldValue(payload, "M");
+    String sStr  = readFieldValue(payload, "S");
+
+    if (idStr.length() == 0 || sStr.length() == 0) {
+      return cmd;
+    }
+
+    cmd.id = idStr.toInt();
+    cmd.totalMinutes = (uint8_t) tStr.toInt();
+    cmd.remainingMinutes = (uint8_t) mStr.toInt();
+    cmd.status = (uint8_t) sStr.toInt();
+
+    // Parse zones (comma-separated) into a list with capacity ZONES_MAX
+    int start = 0;
+    while (start < zStr.length()) {
+      int comma = zStr.indexOf(',', start);
+      String part = (comma >= 0) ? zStr.substring(start, comma) : zStr.substring(start);
+      part.trim();
+      int z = part.toInt();
+      if (z >= 1 && z <= ZONES_MAX) {
+        if (cmd.numZones < ZONES_MAX) {
+          cmd.zones[cmd.numZones++] = (uint8_t)z;
+        } else {
+          if (Serial) {
+            Serial.print("Parse warning: too many zones, ignoring zone ");
+            Serial.println(z);
+          }
+        }
+      }
+      if (comma < 0) break;
+      start = comma + 1;
+    }
+    cmd.valid = true;
+    return cmd;
+  }
+
+  String buildStatusUrl(long id, uint8_t status, uint8_t remainingMinutes) {
+    if (strlen(STATUS_UPDATE_BASE) == 0) return String();
+    String url = STATUS_UPDATE_BASE;
+    url += "?id="; url += id;
+    url += "&password="; url += STATUS_UPDATE_PASSWORD;
+    url += "&m="; url += remainingMinutes;
+    url += "&s="; url += status;
+    url += "&c="; url += STATUS_UPDATE_CONST_C;
+    return url;
+  }
+
+  void sendStatusUpdate(long id, uint8_t status, uint8_t remainingMinutes) {
+    // Enqueue instead of sending immediately; Sim900 will push when idle
+    g_pending.id = id;
+    g_pending.status = status;
+    g_pending.remainingMinutes = remainingMinutes;
+    g_pending.has = true;
+
+    Serial.print("Status update queued: id="); Serial.print(id);
+    Serial.print(" s="); Serial.print(status);
+    Serial.print(" m="); Serial.println(remainingMinutes);
+  }
+}
 
 

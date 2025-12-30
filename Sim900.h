@@ -1,11 +1,11 @@
 #ifndef SIM900_H
 #define SIM900_H
-#include "Parser.h"
 
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 #include "Config.h"
 
+struct IrrigationCommand; // forward declaration
 class Sim900Client {
 public:
   Sim900Client();
@@ -80,33 +80,11 @@ private:
   static const StateDef STATE_TABLE[];
 };
 
-
-
 namespace ParserServer {
-  inline String buildStatusUrl(long id, uint8_t status, uint8_t remainingMinutes) {
-    if (strlen(STATUS_UPDATE_BASE) == 0) return String();
-    String url = STATUS_UPDATE_BASE;
-    url += "?id="; url += id;
-    url += "&password="; url += STATUS_UPDATE_PASSWORD;
-    url += "&m="; url += remainingMinutes;
-    url += "&s="; url += status;
-    url += "&c="; url += STATUS_UPDATE_CONST_C;
-    return url;
-  }
-
-  inline void sendStatusUpdate(Sim900Client& client, long id, uint8_t status, uint8_t remainingMinutes) {
-    String url = buildStatusUrl(id, status, remainingMinutes);
-    if (url.length() == 0) {
-      Serial.println("Status update skipped: STATUS_UPDATE_BASE not configured.");
-      return;
-    }
-    if (client.isIdle()) {
-      client.startGet(url.c_str());
-      Serial.print("Status update requested: "); Serial.println(url);
-    } else {
-      Serial.println("Status update skipped: modem busy.");
-    }
-  }
+  IrrigationCommand parsePayload(const String& payload);
+  bool consumePendingStatus(String& outUrl);
+  String buildStatusUrl(long id, uint8_t status, uint8_t remainingMinutes);
+  void sendStatusUpdate(long id, uint8_t status, uint8_t remainingMinutes);
 }
 
 #endif

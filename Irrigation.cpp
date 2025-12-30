@@ -1,42 +1,29 @@
 #include "Irrigation.h"
+#include "EepromStore.h"
+
+#define LOG(x) Serial.print(x)
+#define LOGln(x) Serial.println(x)
 
 IrrigationManager::IrrigationManager(Sim900Client& modem)
   : sim(modem),
     state(Idle),
-    currentId(-1),
-    currentStatus(0xFF),
-    zonesCount(0),
+    currentCmd(),
     remainingSeconds(0),
     lastTickMs(0),
     lastPersistMs(0) {
 }
 
 void IrrigationManager::begin() {
-  PersistedIrrigation s;
-  if (EepromStore::load(s)) {
-    restore(s);
-    Serial.print("Resumed irrigation ID=");
-    Serial.print(currentId);
-    Serial.print(" status=");
-    Serial.print(currentStatus);
-    Serial.print(" remaining=");
-    Serial.print(remainingSeconds);
-    Serial.println("s");
+  if (restore()) {
+    LOG("Resumed irr. ID="); LOG(currentCmd.id); LOG(" status="); LOG(currentCmd.status);
+    LOG(" remaining="); LOG(remainingSeconds); LOGln("s");
     // Re-apply outputs for role
-    IrrigationCommand cmd;
-    cmd.valid = true;
-    cmd.id = currentId;
-    cmd.numZones = zonesCount;
-    for (uint8_t i = 0; i < zonesCount; i++) cmd.zones[i] = zones[i];
-    cmd.totalMinutes = 0;
-    cmd.remainingMinutes = 0;
-    cmd.status = currentStatus;
-    if (ROLE == ROLE_MASTER && (currentStatus == 2)) {
+    if (ROLE == ROLE_MASTER && (currentCmd.status == 2)) {
       pumpOn();
-      applyZones(cmd, true);
+      applyZones(currentCmd, true);
       state = Running;
-    } else if (ROLE == ROLE_SLAVE && (currentStatus == 1 || currentStatus == 2)) {
-      applyZones(cmd, true);
+    } else if (ROLE == ROLE_SLAVE && (currentCmd.status == 1 || currentCmd.status == 2)) {
+      applyZones(currentCmd, true);
       state = Running;
     } else {
       state = Idle;
@@ -44,9 +31,7 @@ void IrrigationManager::begin() {
   } else {
     // ensure outputs off
     for (uint8_t z = 1; z <= ZONES_MAX; z++) zoneOff(z);
-    #if ROLE == ROLE_MASTER
-    pumpOff();
-    #endif
+    if (ROLE == ROLE_MASTER) pumpOff();
   }
   lastTickMs = millis();
   lastPersistMs = lastTickMs;
@@ -54,28 +39,28 @@ void IrrigationManager::begin() {
 
 void IrrigationManager::tick() {
   if (state != Running) return;
+  //if irrigation is running, 
+  //check if 1 second has passed since last tick, if so, decrement remaining seconds
   uint32_t now = millis();
   if (now - lastTickMs >= 1000) {
     lastTickMs = now;
     if (remainingSeconds > 0) remainingSeconds--;
   }
+  //if 15 seconds have passed since last persist, persist the current state
   if (now - lastPersistMs >= 15000) {
     lastPersistMs = now;
     persist(true);
   }
+  //if remaining seconds is 0, stop the irrigation
   if (remainingSeconds == 0) {
     // Time's up -> master stops, slave will stop upon S=3
     if (ROLE == ROLE_MASTER) {
-      IrrigationCommand cmd;
-      cmd.valid = true;
-      cmd.id = currentId;
-      cmd.numZones = zonesCount;
-      for (uint8_t i = 0; i < zonesCount; i++) cmd.zones[i] = zones[i];
-      stopMasterComplete(cmd);
+      stopMasterComplete(currentCmd);
     }
   }
 }
 
+//Returns true if the command has any zones that are controlled by the current role
 bool IrrigationManager::roleHasAnyZone(const IrrigationCommand& cmd) const {
   for (uint8_t i = 0; i < cmd.numZones; i++) {
     int p = getZonePin(cmd.zones[i]);
@@ -84,12 +69,14 @@ bool IrrigationManager::roleHasAnyZone(const IrrigationCommand& cmd) const {
   return false;
 }
 
+//Applies the zones in the command to the current role
 void IrrigationManager::applyZones(const IrrigationCommand& cmd, bool on) {
   for (uint8_t i = 0; i < cmd.numZones; i++) {
     uint8_t z = cmd.zones[i];
     int p = getZonePin(z);
     if (p >= 0) {
-      if (on) zoneOn(z); else zoneOff(z);
+      if (on) zoneOn(z); 
+      else zoneOff(z);
     }
   }
 }
@@ -97,88 +84,83 @@ void IrrigationManager::applyZones(const IrrigationCommand& cmd, bool on) {
 void IrrigationManager::persist(bool active) {
   PersistedIrrigation s;
   s.active = active ? 1 : 0;
-  s.irrigationId = currentId;
-  s.status = currentStatus;
+  s.cmd = currentCmd;
   s.remainingSeconds = remainingSeconds;
   s.role = ROLE;
-  s.numZones = zonesCount;
-  for (uint8_t i = 0; i < zonesCount; i++) s.zones[i] = zones[i];
   EepromStore::save(s);
 }
 
-void IrrigationManager::restore(const PersistedIrrigation& s) {
-  currentId = s.irrigationId;
-  currentStatus = s.status;
+bool IrrigationManager::restore() {
+  PersistedIrrigation s;
+  if (!EepromStore::load(s)) return false;
+  currentCmd = s.cmd;
+  currentCmd.valid = true; 
+  if (currentCmd.numZones > ZONES_MAX) currentCmd.numZones = ZONES_MAX;
   remainingSeconds = s.remainingSeconds;
-  zonesCount = s.numZones;
-  for (uint8_t i = 0; i < zonesCount; i++) zones[i] = s.zones[i];
+  return true;
 }
 
 void IrrigationManager::startSlaveOnly(const IrrigationCommand& cmd) {
   if (!roleHasAnyZone(cmd)) return;
   applyZones(cmd, true);
-  currentId = cmd.id;
-  currentStatus = 1;
-  zonesCount = cmd.numZones;
-  for (uint8_t i = 0; i < zonesCount; i++) zones[i] = cmd.zones[i];
+  currentCmd.id = cmd.id;
+  currentCmd.status = 1;
+  currentCmd.numZones = cmd.numZones;
+  for (uint8_t i = 0; i < currentCmd.numZones; i++) currentCmd.zones[i] = cmd.zones[i];
+
   remainingSeconds = (uint32_t)cmd.remainingMinutes * 60UL;
   state = Running;
   persist(true);
-  ParserServer::sendStatusUpdate(sim, cmd.id, 1, cmd.remainingMinutes);
+  ParserServer::sendStatusUpdate(currentCmd.id, 1, cmd.remainingMinutes);
 }
 
 void IrrigationManager::startMasterBoth(const IrrigationCommand& cmd) {
   if (!roleHasAnyZone(cmd)) return;
-  #if ROLE == ROLE_MASTER
-  pumpOn();
-  #endif
+  if (ROLE == ROLE_MASTER) pumpOn();
+
   applyZones(cmd, true);
-  currentId = cmd.id;
-  currentStatus = 2;
-  zonesCount = cmd.numZones;
-  for (uint8_t i = 0; i < zonesCount; i++) zones[i] = cmd.zones[i];
+  currentCmd.id = cmd.id;
+  currentCmd.status = 2;
+  currentCmd.numZones = cmd.numZones;
+  for (uint8_t i = 0; i < currentCmd.numZones; i++) currentCmd.zones[i] = cmd.zones[i];
   remainingSeconds = (uint32_t)cmd.remainingMinutes * 60UL;
   state = Running;
   persist(true);
-  ParserServer::sendStatusUpdate(sim, cmd.id, 2, cmd.remainingMinutes);
+  ParserServer::sendStatusUpdate(currentCmd.id, 2, cmd.remainingMinutes);
 }
 
 void IrrigationManager::stopMasterComplete(const IrrigationCommand& cmd) {
   applyZones(cmd, false);
-  #if ROLE == ROLE_MASTER
-  pumpOff();
-  #endif
-  currentStatus = 3;
+  if (ROLE == ROLE_MASTER) pumpOff();
+  currentCmd.status = 3;
   state = Idle;
   persist(false);
-  ParserServer::sendStatusUpdate(sim, cmd.id, 3, 0);
+  ParserServer::sendStatusUpdate(currentCmd.id, 3, 0);
 }
 
 void IrrigationManager::stopSlaveComplete(const IrrigationCommand& cmd) {
   applyZones(cmd, false);
-  currentStatus = 4;
+  currentCmd.status = 4;
   state = Idle;
   persist(false);
-  ParserServer::sendStatusUpdate(sim, cmd.id, 4, 0);
+  ParserServer::sendStatusUpdate(currentCmd.id, 4, 0);
 }
 
 void IrrigationManager::stopMasterImmediate(const IrrigationCommand& cmd) {
   applyZones(cmd, false);
-  #if ROLE == ROLE_MASTER
-  pumpOff();
-  #endif
-  currentStatus = 6;
+  if (ROLE == ROLE_MASTER) pumpOff();
+  currentCmd.status = 6;
   state = Idle;
   persist(false);
-  ParserServer::sendStatusUpdate(sim, cmd.id, 6, 0);
+  ParserServer::sendStatusUpdate(currentCmd.id, 6, 0);
 }
 
 void IrrigationManager::stopSlaveAfterMaster(const IrrigationCommand& cmd) {
   applyZones(cmd, false);
-  currentStatus = 7;
+  currentCmd.status = 7;
   state = Idle;
   persist(false);
-  ParserServer::sendStatusUpdate(sim, cmd.id, 7, 0);
+  ParserServer::sendStatusUpdate(currentCmd.id, 7, 0);
 }
 
 void IrrigationManager::onServerCommand(const IrrigationCommand& cmd) {

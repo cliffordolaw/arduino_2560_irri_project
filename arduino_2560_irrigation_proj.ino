@@ -1,9 +1,8 @@
-// Arduino Mega 2560 Irrigation - Phase 1: Skeleton + Polling + Parser
+// Arduino Mega 2560 Irrigation
 
 #include <SoftwareSerial.h>
 #include "Config.h"
 #include "Pins.h"
-#include "Parser.h"
 #include "Sim900.h"
 #include "Irrigation.h"
 
@@ -31,7 +30,7 @@ void setup() {
   sim900Client.begin(sim900ss);
   // sim900Client.begin(Serial); //NOTE: This is for testing purposes only, SoftwareSerial is used for the actual hardware.
   irrigation.begin();
-  Serial.println("Irrigation Phase 1 ready.");
+  Serial.println("Irrigation program ready [ROLE=" + String(ROLE_NAME) + "]");
 }
 
 void loop() {

@@ -4,9 +4,25 @@
 #include <Arduino.h>
 #include "Config.h"
 #include "Pins.h"
-#include "Parser.h"
 #include "Sim900.h"
-#include "EepromStore.h"
+// forward declare to avoid circular include with EepromStore
+struct PersistedIrrigation;
+
+struct IrrigationCommand {
+  bool valid;
+  long id;
+  uint8_t zones[ZONES_MAX];
+  uint8_t numZones;
+  uint8_t totalMinutes;     // T
+  uint8_t remainingMinutes; // M
+  uint8_t status;           // S
+
+  IrrigationCommand(): valid(false), id(-1), numZones(0),
+      totalMinutes(0), remainingMinutes(0), status(0xFF) 
+  {
+    for (uint8_t i = 0; i < ZONES_MAX; i++) zones[i] = 0;
+  }
+};
 
 class IrrigationManager {
 public:
@@ -32,14 +48,11 @@ private:
   void applyZones(const IrrigationCommand& cmd, bool on);
   bool roleHasAnyZone(const IrrigationCommand& cmd) const;
   void persist(bool active);
-  void restore(const PersistedIrrigation& s);
+  bool restore();
 
   Sim900Client& sim;
   RunState state;
-  long currentId;
-  uint8_t currentStatus;
-  uint8_t zones[ZONES_MAX];
-  uint8_t zonesCount;
+  IrrigationCommand currentCmd;
   uint32_t remainingSeconds;
   uint32_t lastTickMs;
   uint32_t lastPersistMs;
