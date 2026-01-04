@@ -50,14 +50,20 @@ void Sim900Client::changeState(State s, const char* reason) {
 
 void Sim900Client::sendCmd(const String& cmd) {
   if (!sim) return;
-  sim->println(cmd);
+  sim->println(cmd+"\r");
 }
 
 void Sim900Client::readIntoBuffer() {
   if (!sim) return;
+  bool new_data = false;
   while (sim->available()) {
+    new_data = true;
     char c = (char)sim->read();
     buffer += c;
+  }
+  if (new_data) {
+    Serial.print("Buffer: ");
+    Serial.println(buffer);
   }
 }
 
@@ -208,12 +214,13 @@ const Sim900Client::StateDef Sim900Client::STATE_TABLE[] = {
   { "StartBearer0", &Sim900Client::enter_StartBearer0, 5000,  Error,      SetContype,  "OK" },
   { "SetContype",   &Sim900Client::enter_SetContype,   3000,  Error,      SetApn,      "OK" },
   { "SetApn",       &Sim900Client::enter_SetApn,       5000,  Error,      Attach,      "OK" },
-  { "Attach",       &Sim900Client::enter_Attach,       10000, Error,      StartBearer1,"OK" },
-  { "StartBearer1", &Sim900Client::enter_StartBearer1, 10000, Error,      HttpInit,    "OK" },
-  { "HttpInit",     &Sim900Client::enter_HttpInit,     3000,  Error,      HttpCid,     "OK" },
+  { "Attach",       &Sim900Client::enter_Attach,       20000, Error,      StartBearer1,"OK" },
+  { "StartBearer1", &Sim900Client::enter_StartBearer1, 10000, Error,      Idle,    "OK" },
+  /* StartBearer1 MARKS THE END OF THE BEARER SETUP SEQUENCE */
+  { "HttpInit",     &Sim900Client::enter_HttpInit,     3000,  HttpCid /* ignore error */,      HttpCid,     "OK" },
   { "HttpCid",      &Sim900Client::enter_HttpCid,      3000,  Error,      HttpUrl,     "OK" },
   { "HttpUrl",      &Sim900Client::enter_HttpUrl,      3000,  Error,      HttpAction,  "OK" },
-  { "HttpAction",   &Sim900Client::enter_HttpAction,   3000,  Error,      HttpRead,    "OK" },
+  { "HttpAction",   &Sim900Client::enter_HttpAction,   5000,  Error,      HttpRead,    "+HTTPACTION:" },
   { "HttpRead",     &Sim900Client::enter_HttpRead,     10000,  Error,      Idle,        "+HTTPREAD:" },
   { "Error",        &Sim900Client::enter_NoOp,         5000,  StartBearer0, Error,     NULL }
   //When error state times out, it will transition to StartBearer0 to retry the connection

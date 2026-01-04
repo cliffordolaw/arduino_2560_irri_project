@@ -12,9 +12,9 @@
 #endif
 
 // SIM900 serial pins (SoftwareSerial)
-// SIM900 TX -> Arduino RX (pin 10), SIM900 RX -> Arduino TX (pin 11)
-#define SIM900_RX_PIN 10
-#define SIM900_TX_PIN 11
+// SIM900 TX -> Arduino RX (pin 11), SIM900 RX -> Arduino TX (pin 10)
+#define SIM900_RX_PIN 11
+#define SIM900_TX_PIN 10
 
 // Network/APN
 static const char APN[] = "iot.1nce.net";
@@ -39,7 +39,7 @@ static const int8_t zoneToPinMaster[ZONES_MAX + 1] = {
 static const int8_t zoneToPinSlave[ZONES_MAX + 1] = {
   -1, -1, -1, -1, -1, -1, -1, 29, 30, 31, -1
 };
-// Pump pin (master only; unused on slave)
+// Pump pin (master only) 
 static const int PUMP_PIN = 32;
 
 // Role name

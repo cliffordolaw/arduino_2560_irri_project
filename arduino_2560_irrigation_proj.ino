@@ -1,6 +1,6 @@
 // Arduino Mega 2560 Irrigation
 
-#include <SoftwareSerial.h>
+
 #include "Config.h"
 #include "Pins.h"
 #include "Sim900.h"
