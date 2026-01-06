@@ -6,7 +6,7 @@
 #include "Sim900.h"
 #include "Irrigation.h"
 
-SoftwareSerial sim900ss(SIM900_RX_PIN, SIM900_TX_PIN);
+SoftwareSerial sim900ss(SIM900_TX_PIN, SIM900_RX_PIN);
 Sim900Client sim900Client;
 IrrigationManager irrigation(sim900Client);
 

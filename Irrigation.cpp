@@ -14,6 +14,12 @@ IrrigationManager::IrrigationManager(Sim900Client& modem)
 }
 
 void IrrigationManager::begin() {
+  //first turn everything off before restoring from eeprom 
+  // ensure outputs off
+  for (uint8_t z = 1; z <= ZONES_MAX; z++) zoneOff(z);
+  if (ROLE == ROLE_MASTER) pumpOff();
+  
+  //restore from eeprom
   if (restore()) {
     LOG("Resumed irr. ID="); LOG(currentCmd.id); LOG(" status="); LOG(currentCmd.status);
     LOG(" remaining="); LOG(remainingSeconds); LOGln("s");
@@ -28,11 +34,7 @@ void IrrigationManager::begin() {
     } else {
       state = Idle;
     }
-  } else {
-    // ensure outputs off
-    for (uint8_t z = 1; z <= ZONES_MAX; z++) zoneOff(z);
-    if (ROLE == ROLE_MASTER) pumpOff();
-  }
+  } 
   lastTickMs = millis();
   lastPersistMs = lastTickMs;
 }
@@ -46,8 +48,12 @@ void IrrigationManager::tick() {
     lastTickMs = now;
     if (remainingSeconds > 0) remainingSeconds--;
   }
+  //Update remaining minutes in real time 
+  if (state == Running && (remainingSeconds % 60) == 0) {
+    ParserServer::sendStatusUpdate(currentCmd.id, currentCmd.status, (uint8_t) (remainingSeconds/60));
+  }
   //if 15 seconds have passed since last persist, persist the current state
-  if (now - lastPersistMs >= 15000) {
+  if (now - lastPersistMs >= 120000) {
     lastPersistMs = now;
     persist(true);
   }
@@ -55,8 +61,9 @@ void IrrigationManager::tick() {
   if (remainingSeconds == 0) {
     // Time's up -> master stops, slave will stop upon S=3
     if (ROLE == ROLE_MASTER) {
-      stopMasterComplete(currentCmd);
+      stopMasterComplete(currentCmd);   
     }
+    state = Idle;
   }
 }
 
@@ -111,6 +118,7 @@ void IrrigationManager::startSlaveOnly(const IrrigationCommand& cmd) {
   remainingSeconds = (uint32_t)cmd.remainingMinutes * 60UL;
   state = Running;
   persist(true);
+  Serial.println("Setting slave to 1 ");
   ParserServer::sendStatusUpdate(currentCmd.id, 1, cmd.remainingMinutes);
 }
 
@@ -185,11 +193,11 @@ void IrrigationManager::onServerCommand(const IrrigationCommand& cmd) {
       startSlaveOnly(cmd); // S=0 -> S=1
       return;
     }
-    if (cmd.status == 3 && state == Running) {
+    if (cmd.status == 3) {
       stopSlaveComplete(cmd); // -> S=4
       return;
     }
-    if (cmd.status == 6 && state == Running) {
+    if (cmd.status == 6) {
       stopSlaveAfterMaster(cmd); // -> S=7
       return;
     }

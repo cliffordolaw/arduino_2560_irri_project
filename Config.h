@@ -8,7 +8,7 @@
 #define ROLE_SLAVE 2
 
 #ifndef ROLE
-#define ROLE ROLE_MASTER
+#define ROLE ROLE_SLAVE
 #endif
 
 // SIM900 serial pins (SoftwareSerial)
@@ -34,7 +34,7 @@ static const int STATUS_UPDATE_CONST_C = 20;
 // Index 0 is unused so zones map naturally 1..10.
 static const uint8_t ZONES_MAX = 10;
 static const int8_t zoneToPinMaster[ZONES_MAX + 1] = {
-  -1, 22, 23, 24, 25, 26, 27, -1, -1, -1, 28
+  -1, 31, 29, 27, 26, 25, 24, -1, -1, -1, 28
 };
 static const int8_t zoneToPinSlave[ZONES_MAX + 1] = {
   -1, -1, -1, -1, -1, -1, -1, 29, 30, 31, -1
@@ -59,7 +59,7 @@ static const int8_t* const ACTIVE_ZONE_TO_PIN = zoneToPinSlave;
 // Timings
 static const unsigned long SERIAL_BAUD = 9600;
 static const unsigned long SIM900_BAUD = 9600;
-static const unsigned long POLL_INTERVAL_MS = 8000;
+static const unsigned long POLL_INTERVAL_MS = 60000;
 
 // Error handling
 // Error LED pin (default to onboard LED). Changeable here.

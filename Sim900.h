@@ -2,6 +2,9 @@
 #define SIM900_H
 
 #include <Arduino.h>
+
+#define _SS_MAX_RX_BUFF 1024 // RX buffer size
+
 #include <SoftwareSerial.h>
 #include "Config.h"
 
@@ -56,7 +59,8 @@ private:
   void enter_HttpUrl();
   void enter_HttpAction();
   void enter_HttpRead();
-  void enter_NoOp(); // for Idle/Error
+  void enter_NoOp(); // for Idle
+  void enter_Error(); //for error
 
   Stream* sim;
   State state;

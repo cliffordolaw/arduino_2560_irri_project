@@ -32,6 +32,7 @@ void Sim900Client::changeState(State s, const char* reason) {
 
   // Log the state change
   // if (Serial) {
+    /*
     Serial.print("State: ");
     Serial.print(defFor(prev).name);
     Serial.print(" -> ");
@@ -39,6 +40,7 @@ void Sim900Client::changeState(State s, const char* reason) {
     Serial.print(" (");
     if (reason) Serial.print(reason);
     Serial.println(")");
+    */
   // }
 
   // Call entry action
@@ -60,14 +62,17 @@ void Sim900Client::readIntoBuffer() {
     new_data = true;
     char c = (char)sim->read();
     buffer += c;
+    delay(1);
   }
   if (new_data) {
-    Serial.print("Buffer: ");
-    Serial.println(buffer);
+    //Serial.print("Buffer: ");
+    //Serial.println(buffer);
   }
 }
 
 void Sim900Client::clearBuffer() {
+  //Serial.print("Clearing buffer: ");
+  //Serial.println(buffer);
   buffer = "";
 }
 
@@ -77,7 +82,7 @@ bool Sim900Client::startGet(const char* url) {
   newResponse = false;
   lastBody = "";
   // Jump directly into HTTP operation sequence
-  changeState(HttpInit, "startGet");
+  changeState(HttpCid, "startGet");
   return true;
 }
 
@@ -151,21 +156,23 @@ int Sim900Client::pollAndProcess(IrrigationCommand& cmd) {
     }
   }
   if (now >= nextPollAt) {
-    Serial.print("["); Serial.print(ROLE_NAME); Serial.print("] Polling: "); Serial.println(ROLE_URL);
-    if (isIdle() && !hasNewResponse()){
-      startGet(ROLE_URL);
-    } else {
-      Serial.println("--> skipped: modem busy/error state.");
-    }
+    Serial.print("["); Serial.print(ROLE_NAME); Serial.print("] Polling: "); Serial.print(ROLE_URL);
+    if (isIdle() && !hasNewResponse()) startGet(ROLE_URL);
+    else Serial.print("  --> [skipped, modem busy].");
+    Serial.print("  State: ");
+    Serial.print(defFor(state).name);
+    Serial.println();
+
     nextPollAt = now + POLL_INTERVAL_MS;
   }
+  
 
   if (hasNewResponse()) {
     String body = takeResponse();
     Serial.print("[");
     Serial.print(ROLE_NAME);
-    Serial.println("] HTTP body:");
-    Serial.println(body);
+    Serial.print("] HTTP body: ");
+    Serial.print(body);
 
     cmd = ParserServer::parsePayload(body);
     if (!cmd.valid) {
@@ -173,18 +180,20 @@ int Sim900Client::pollAndProcess(IrrigationCommand& cmd) {
       return -1;
     }
 
+    Serial.print("; Got: ");
     Serial.print("ID="); Serial.print(cmd.id);
     Serial.print(" T="); Serial.print(cmd.totalMinutes);
     Serial.print(" M="); Serial.print(cmd.remainingMinutes);
-    Serial.print(" S="); Serial.println(cmd.status);
+    Serial.print(" S="); Serial.print(cmd.status);
 
-    Serial.print(" Zones["); Serial.print(cmd.numZones); Serial.println("]:");
+    Serial.print("; Zones["); Serial.print(cmd.numZones); Serial.print("]:");
     for (uint8_t i = 0; i < cmd.numZones; i++) {
       uint8_t z = cmd.zones[i];
       int pin = getZonePin(z);
-      Serial.print("  - Zone "); Serial.print(z);
-      Serial.print(" -> pin "); Serial.println(pin);
+      Serial.print("Z"); Serial.print(z);
+      Serial.print("->P"); Serial.print(pin); Serial.print("; ");
     }
+    Serial.println();
 
     return 0; 
   }
@@ -193,6 +202,7 @@ int Sim900Client::pollAndProcess(IrrigationCommand& cmd) {
 
 // --- State table and entry actions ---
 void Sim900Client::enter_NoOp() {/* nothing */}
+void Sim900Client::enter_Error() {}
 void Sim900Client::enter_StartBearer0() { sendCmd("AT+SAPBR=0,1"); }
 void Sim900Client::enter_SetContype() { sendCmd("AT+SAPBR=3,1,\"Contype\",\"GPRS\""); }
 void Sim900Client::enter_SetApn() { sendCmd(String("AT+SAPBR=3,1,\"APN\",\"") + APN + "\""); }
@@ -211,18 +221,18 @@ const Sim900Client::StateDef& Sim900Client::defFor(State s) const {
 // name, onEnter, timeoutMs, onTimeout, onComplete, expectedToken
 const Sim900Client::StateDef Sim900Client::STATE_TABLE[] = {
   { "Idle",         &Sim900Client::enter_NoOp,      0,        Error,      Idle,        NULL },
-  { "StartBearer0", &Sim900Client::enter_StartBearer0, 5000,  Error,      SetContype,  "OK" },
+  { "StartBearer0", &Sim900Client::enter_StartBearer0, 5000,  SetContype  /* ignore error */,      SetContype,  "OK" },
   { "SetContype",   &Sim900Client::enter_SetContype,   3000,  Error,      SetApn,      "OK" },
   { "SetApn",       &Sim900Client::enter_SetApn,       5000,  Error,      Attach,      "OK" },
   { "Attach",       &Sim900Client::enter_Attach,       20000, Error,      StartBearer1,"OK" },
-  { "StartBearer1", &Sim900Client::enter_StartBearer1, 10000, Error,      Idle,    "OK" },
-  /* StartBearer1 MARKS THE END OF THE BEARER SETUP SEQUENCE */
-  { "HttpInit",     &Sim900Client::enter_HttpInit,     3000,  HttpCid /* ignore error */,      HttpCid,     "OK" },
+  { "StartBearer1", &Sim900Client::enter_StartBearer1, 10000, Error,      HttpInit,    "OK" },
+  { "HttpInit",     &Sim900Client::enter_HttpInit,     3000,  Idle /* ignore error */,      Idle,     "OK" },
+    /* HttpInit MARKS THE END OF THE BEARER SETUP SEQUENCE */
   { "HttpCid",      &Sim900Client::enter_HttpCid,      3000,  Error,      HttpUrl,     "OK" },
   { "HttpUrl",      &Sim900Client::enter_HttpUrl,      3000,  Error,      HttpAction,  "OK" },
   { "HttpAction",   &Sim900Client::enter_HttpAction,   5000,  Error,      HttpRead,    "+HTTPACTION:" },
   { "HttpRead",     &Sim900Client::enter_HttpRead,     10000,  Error,      Idle,        "+HTTPREAD:" },
-  { "Error",        &Sim900Client::enter_NoOp,         5000,  StartBearer0, Error,     NULL }
+  { "Error",        &Sim900Client::enter_Error,         5000,  StartBearer0, Error,     NULL }
   //When error state times out, it will transition to StartBearer0 to retry the connection
 };
 
@@ -319,9 +329,9 @@ namespace ParserServer {
     g_pending.remainingMinutes = remainingMinutes;
     g_pending.has = true;
 
-    Serial.print("Status update queued: id="); Serial.print(id);
-    Serial.print(" s="); Serial.print(status);
-    Serial.print(" m="); Serial.println(remainingMinutes);
+    //Serial.print("Status update queued: id="); Serial.print(id);
+    //Serial.print(" s="); Serial.print(status);
+    //Serial.print(" m="); Serial.println(remainingMinutes);
   }
 }
 

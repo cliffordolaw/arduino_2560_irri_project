@@ -15,34 +15,44 @@ static inline void initPinsForRole(uint8_t role) {
     int p = ACTIVE_ZONE_TO_PIN[z];
     if (p >= 0) {
       pinMode(p, OUTPUT);
-      digitalWrite(p, LOW);
+      digitalWrite(p, HIGH);
     }
   }
   // Pump (master)
   #if ROLE == ROLE_MASTER
   {
     pinMode(PUMP_PIN, OUTPUT); 
-    digitalWrite(PUMP_PIN, LOW);
+    digitalWrite(PUMP_PIN, HIGH);
   }
   #endif
 }
 
 static inline void zoneOn(uint8_t zone) {
   int p = getZonePin(zone);
-  if (p >= 0) digitalWrite(p, HIGH);
+  if (p >= 0) {
+    Serial.print("Turning On pin: ");
+    Serial.println(p);
+    digitalWrite(p, LOW);
+  }
 }
 
 static inline void zoneOff(uint8_t zone) {
   int p = getZonePin(zone);
-  if (p >= 0) digitalWrite(p, LOW);
+  if (p >= 0) {
+    Serial.print("Turning Off pin: ");
+    Serial.println(p);
+    digitalWrite(p, HIGH );
+  }
 }
 
-static inline void pumpOn() {
-  digitalWrite(PUMP_PIN, HIGH);
+static inline void pumpOn() { 
+  Serial.print("Turning pump on ");
+  digitalWrite(PUMP_PIN, LOW);
 }
 
 static inline void pumpOff() {
-  digitalWrite(PUMP_PIN, LOW);
+  Serial.print("Turning pump off ");
+  digitalWrite(PUMP_PIN, HIGH);
 }
 
 #endif
