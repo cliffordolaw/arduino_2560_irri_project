@@ -24,11 +24,14 @@ void IrrigationManager::begin() {
     LOG("Resumed irr. ID="); LOG(currentCmd.id); LOG(" status="); LOG(currentCmd.status);
     LOG(" remaining="); LOG(remainingSeconds); LOGln("s");
     // Re-apply outputs for role
-    if (ROLE == ROLE_MASTER && (currentCmd.status == 2)) {
+    if (ROLE == ROLE_MASTER && (currentCmd.status == 3)) {
       pumpOn();
       applyZones(currentCmd, true);
       state = Running;
-    } else if (ROLE == ROLE_SLAVE && (currentCmd.status == 1 || currentCmd.status == 2)) {
+    } else if (ROLE == ROLE_SLAVE1 && (currentCmd.status == 1 || currentCmd.status == 2 || currentCmd.status == 3)) {
+      applyZones(currentCmd, true);
+      state = Running;
+    } else if (ROLE == ROLE_SLAVE2 && (currentCmd.status == 2 || currentCmd.status == 3)) {
       applyZones(currentCmd, true);
       state = Running;
     } else {
@@ -59,11 +62,16 @@ void IrrigationManager::tick() {
   }
   //if remaining seconds is 0, stop the irrigation
   if (remainingSeconds == 0) {
-    // Time's up -> master stops, slave will stop upon S=3
+    // Time's up -> owner stops
     if (ROLE == ROLE_MASTER) {
+      // Master-owned timing (pump=2 scenario)
       stopMasterComplete(currentCmd);   
+    } else if (ROLE == ROLE_SLAVE1) {
+      // Slave1-owned timing when its pump zone is active
+      stopSlaveComplete(currentCmd);
+    } else if (ROLE == ROLE_SLAVE2) {
+      stopSlaveComplete(currentCmd);
     }
-    state = Idle;
   }
 }
 
@@ -111,14 +119,13 @@ void IrrigationManager::startSlaveOnly(const IrrigationCommand& cmd) {
   if (!roleHasAnyZone(cmd)) return;
   applyZones(cmd, true);
   currentCmd.id = cmd.id;
-  currentCmd.status = 1;
+  currentCmd.status = 1; // started by slave1 only
   currentCmd.numZones = cmd.numZones;
   for (uint8_t i = 0; i < currentCmd.numZones; i++) currentCmd.zones[i] = cmd.zones[i];
 
   remainingSeconds = (uint32_t)cmd.remainingMinutes * 60UL;
   state = Running;
   persist(true);
-  Serial.println("Setting slave to 1 ");
   ParserServer::sendStatusUpdate(currentCmd.id, 1, cmd.remainingMinutes);
 }
 
@@ -128,77 +135,113 @@ void IrrigationManager::startMasterBoth(const IrrigationCommand& cmd) {
 
   applyZones(cmd, true);
   currentCmd.id = cmd.id;
-  currentCmd.status = 2;
+  currentCmd.status = 3; // in progress (master + slaves)
   currentCmd.numZones = cmd.numZones;
   for (uint8_t i = 0; i < currentCmd.numZones; i++) currentCmd.zones[i] = cmd.zones[i];
   remainingSeconds = (uint32_t)cmd.remainingMinutes * 60UL;
   state = Running;
   persist(true);
-  ParserServer::sendStatusUpdate(currentCmd.id, 2, cmd.remainingMinutes);
+  ParserServer::sendStatusUpdate(currentCmd.id, 3, cmd.remainingMinutes);
 }
 
 void IrrigationManager::stopMasterComplete(const IrrigationCommand& cmd) {
   applyZones(cmd, false);
   if (ROLE == ROLE_MASTER) pumpOff();
-  currentCmd.status = 3;
-  state = Idle;
-  persist(false);
-  ParserServer::sendStatusUpdate(currentCmd.id, 3, 0);
-}
-
-void IrrigationManager::stopSlaveComplete(const IrrigationCommand& cmd) {
-  applyZones(cmd, false);
-  currentCmd.status = 4;
+  currentCmd.status = 4; // completed by master
   state = Idle;
   persist(false);
   ParserServer::sendStatusUpdate(currentCmd.id, 4, 0);
 }
 
+void IrrigationManager::stopSlaveComplete(const IrrigationCommand& cmd) {
+  applyZones(cmd, false);
+  // If master already completed (4), slave1 completion -> 5, slave2 both -> 6
+  if (ROLE == ROLE_SLAVE1) {
+    currentCmd.status = 5;
+  } else if (ROLE == ROLE_SLAVE2) {
+    // can't know if slave1 done; use 6 as terminal if only zones on slave2
+    currentCmd.status = 6;
+  } else {
+    currentCmd.status = 6;
+  }
+  state = Idle;
+  persist(false);
+  ParserServer::sendStatusUpdate(currentCmd.id, currentCmd.status, 0);
+}
+
 void IrrigationManager::stopMasterImmediate(const IrrigationCommand& cmd) {
   applyZones(cmd, false);
   if (ROLE == ROLE_MASTER) pumpOff();
-  currentCmd.status = 6;
+  currentCmd.status = 8; // stopped by master
   state = Idle;
   persist(false);
-  ParserServer::sendStatusUpdate(currentCmd.id, 6, 0);
+  ParserServer::sendStatusUpdate(currentCmd.id, 8, 0);
 }
 
 void IrrigationManager::stopSlaveAfterMaster(const IrrigationCommand& cmd) {
   applyZones(cmd, false);
-  currentCmd.status = 7;
+  // after STOP: slave1 -> 9, slave2 -> 10
+  if (ROLE == ROLE_SLAVE1) currentCmd.status = 9; else currentCmd.status = 10;
   state = Idle;
   persist(false);
-  ParserServer::sendStatusUpdate(currentCmd.id, 7, 0);
+  ParserServer::sendStatusUpdate(currentCmd.id, currentCmd.status, 0);
 }
 
 void IrrigationManager::onServerCommand(const IrrigationCommand& cmd) {
   if (!cmd.valid) return;
   
+  auto hasZone = [&](uint8_t z)->bool{
+    for (uint8_t i=0;i<cmd.numZones;i++) if (cmd.zones[i]==z) return true;
+    return false;
+  };
+  bool pumpIsSlave1 = hasZone(PUMP_ZONE_SLAVE1);
+
   if (ROLE == ROLE_MASTER) {
     // STOP takes precedence
-    if (cmd.status == 5) {
+    if (cmd.status == 7) {
       stopMasterImmediate(cmd);
       return;
     }
-    if (cmd.status == 1 && roleHasAnyZone(cmd)) {
-      startMasterBoth(cmd); // S=1 -> S=2
+    // Start pump if MASTER is pump owner (i.e., no zone5 in list)
+    if ((cmd.status == 1 || cmd.status == 2) && !pumpIsSlave1) {
+      startMasterBoth(cmd); // -> 3
       return;
     }
     if (cmd.status == 0) {
       // Do nothing; wait for slave to start if zones involve slave
       return;
     }
-  } else { // SLAVE
+  } else if (ROLE == ROLE_SLAVE1) {
     if (cmd.status == 0 && roleHasAnyZone(cmd)) {
-      startSlaveOnly(cmd); // S=0 -> S=1
+      startSlaveOnly(cmd); // -> 1
       return;
     }
-    if (cmd.status == 3) {
-      stopSlaveComplete(cmd); // -> S=4
+    if (cmd.status == 4 && state == Running) {
+      stopSlaveComplete(cmd); // -> 5
       return;
     }
-    if (cmd.status == 6) {
-      stopSlaveAfterMaster(cmd); // -> S=7
+    if (cmd.status == 8 && state == Running) {
+      stopSlaveAfterMaster(cmd); // -> 9
+      return;
+    }
+  } else if (ROLE == ROLE_SLAVE2) {
+    if (cmd.status == 1 && roleHasAnyZone(cmd)) {
+      // join after slave1: -> 2
+      applyZones(cmd, true);
+      currentCmd = cmd;
+      currentCmd.status = 2;
+      remainingSeconds = (uint32_t)cmd.remainingMinutes * 60UL;
+      state = Running;
+      persist(true);
+      ParserServer::sendStatusUpdate(currentCmd.id, 2, cmd.remainingMinutes);
+      return;
+    }
+    if (cmd.status == 4 && state == Running) {
+      stopSlaveComplete(cmd); // -> 6
+      return;
+    }
+    if (cmd.status == 8 && state == Running) {
+      stopSlaveAfterMaster(cmd); // -> 10
       return;
     }
   }
