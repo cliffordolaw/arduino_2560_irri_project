@@ -312,10 +312,13 @@ namespace ParserServer {
   }
 
   String buildStatusUrl(long id, uint8_t status, uint8_t remainingMinutes) {
-    String url = ROLE_URL; // same base as read; append update params
-    url += "&id="; url += id;
-    url += "&s="; url += status;
+    if (strlen(STATUS_UPDATE_BASE) == 0) return String();
+    String url = STATUS_UPDATE_BASE;
+    url += "?id="; url += id;
+    url += "&password="; url += STATUS_UPDATE_PASSWORD;
     url += "&m="; url += remainingMinutes;
+    url += "&s="; url += status;
+    url += "&c="; url += STATUS_UPDATE_CONST_C;
     return url;
   }
 

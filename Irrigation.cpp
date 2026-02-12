@@ -236,11 +236,11 @@ void IrrigationManager::onServerCommand(const IrrigationCommand& cmd) {
       ParserServer::sendStatusUpdate(currentCmd.id, 2, cmd.remainingMinutes);
       return;
     }
-    if (cmd.status == 4 && state == Running) {
+    if ((cmd.status == 4 || cmd.status == 5) && state == Running) {
       stopSlaveComplete(cmd); // -> 6
       return;
     }
-    if (cmd.status == 8 && state == Running) {
+    if ((cmd.status == 8 || cmd.status == 9) && state == Running) {
       stopSlaveAfterMaster(cmd); // -> 10
       return;
     }

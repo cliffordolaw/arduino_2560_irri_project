@@ -20,12 +20,20 @@
 // Network/APN
 static const char APN[] = "iot.1nce.net";
 
-// URLs (read and update use the same endpoint, differentiated by role param)
-static const char MASTER_URL[]  = "http://guasertemp.online/irrigazione/leggiirrigazione.php?luogo=Isola&c=master";
-static const char SLAVE1_URL[]  = "http://guasertemp.online/irrigazione/leggiirrigazione.php?luogo=Isola&c=slave1";
-static const char SLAVE2_URL[]  = "http://guasertemp.online/irrigazione/leggiirrigazione.php?luogo=Isola&c=slave2";
+// Site/location selector (Italian: "luogo")
+#define LUOGO "Petriglieri-Virduzzo"
+// Read URLs per role
+#define READ_BASE "http://guasertemp.online/irrigazione/leggiirrigazione.php?luogo="
+static const char MASTER_URL[]  = READ_BASE LUOGO "&c=master";
+static const char SLAVE1_URL[]  = READ_BASE LUOGO "&c=slave1";
+static const char SLAVE2_URL[]  = READ_BASE LUOGO "&c=slave2";
 
-// Status update: same base as ROLE_URL; parameters appended: id, s (status), m (remaining)
+// Status update endpoint (legacy base; used for posting updates only)
+// SIM900 prefers http://
+// Endpoint accepts: id, password, m (remaining minutes), s (status), c (constant=20)
+static const char STATUS_UPDATE_BASE[] = "http://guasertemp.online/irrigazione/irrigazione.php";
+static const char STATUS_UPDATE_PASSWORD[] = "segreta";
+static const int STATUS_UPDATE_CONST_C = 20;
 
 // Pin mapping
 // Index 0 is unused so zones map naturally 1..10.
